@@ -9,10 +9,12 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /workspace
 
-# Telepítsük a futtatáshoz szükséges alap csomagokat
-# A f5-tts modellt itt közvetlenül a GitHubról telepítjük
+# Telepítsük a runpodot és az F5-TTS-t
 RUN pip install --no-cache-dir runpod \
     && pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git
+
+# KÉNYSZERÍTÉS: Újratelepítjük a torch-ot és torchaudio-t, hogy biztosan a megfelelő binárisok legyenek
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --force-reinstall
 
 # A handler fájlt másoljuk be
 COPY handler.py .
