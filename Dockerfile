@@ -1,4 +1,4 @@
-# Használj egy hivatalos PyTorch CUDA képet alapnak (ez már tartalmazza az illesztőket)
+# Használjuk a PyTorch hivatalos képét, ami már tartalmazza a CUDA-t és a torch-ot
 FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
 
 # Telepítsük a szükséges rendszerfüggőségeket
@@ -7,15 +7,11 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Munkakönyvtár beállítása
 WORKDIR /workspace
 
-# Python függőségek telepítése (explicit módon a PyTorch indexből)
-RUN pip install --no-cache-dir \
-    runpod \
-    torch \
-    torchaudio \
-    --index-url https://download.pytorch.org/whl/cu121
+# Csak azt telepítsük, ami nincs benne az alap képben
+# A 'torch' és 'torchaudio' már benne van az alap képben!
+RUN pip install --no-cache-dir runpod
 
 # F5-TTS kód másolása és telepítése
 COPY . .
