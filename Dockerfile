@@ -1,44 +1,51 @@
-# PyTorch runtime CUDA 12.1
-FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+# CUDA 12.1 + cuDNN, Ubuntu 22.04 — F5-TTS-hez ajánlott
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/workspace/.cache/huggingface \
+    TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+    TORCH_HOME=/workspace/.cache/torch
 
-# Rendszerfüggőségek
+# Rendszer csomagok
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    ffmpeg \
-    ca-certificates \
+      python3.10 python3-pip python3.10-venv \
+      git ffmpeg libsndfile1 curl ca-certificates \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 
-# 1) Takarítás: ne keveredjen a conda/pip torch stack
-# (A base image gyakran tartalmaz torch-ot conda-val.)
-RUN pip uninstall -y torch torchaudio torchvision torchtext || true && \
-    conda remove -y pytorch torchaudio torchvision torchtext || true && \
-    conda clean -a -y
-
-# 2) Telepítsünk egy összepasszoló PyTorch + torchaudio + torchvision triót ugyanabból a csatornából
-# CUDA 12.1 wheel-ek a PyTorch hivatalos indexéről
+# 1) PyTorch CUDA 12.1 build
 RUN pip install --upgrade pip && \
-    pip install --index-url https://download.pytorch.org/whl/cu121 \
-      torch==2.3.0 \
-      torchvision==0.18.0 \
-      torchaudio==2.3.0
+    pip install torch==2.3.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121
 
-# 3) Telepítsük a runpodot és az F5-TTS-t
-RUN pip install runpod && \
-    pip install git+https://github.com/SWivid/F5-TTS.git
+# 2) F5-TTS + runtime függőségek
+RUN pip install \
+      f5-tts \
+      runpod \
+      soundfile \
+      numpy \
+      transformers \
+      accelerate
 
-# 4) Gyors ellenőrzés build közben (ha itt elhasal, rögtön látod)
-RUN python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)" && \
-    python -c "import torchaudio; print('torchaudio', torchaudio.__version__)"
+# 3) Modell előmelegítés build közben (opcionális, de gyorsítja a cold startot)
+#    Ha nem akarod a nagy image-et, kommenteld ki — futáskor tölti le.
+RUN python -c "\
+from f5_tts.infer.utils_infer import load_vocoder, load_model; \
+from f5_tts.model import DiT; \
+load_vocoder(); \
+load_model(DiT, dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4), \
+           ckpt_path='hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors'); \
+print('models cached')"
 
-# Handler
+# 4) Build-time sanity check
+RUN python -c "import torch, torchaudio; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'ta', torchaudio.__version__)"
+
+# 5) Handler
 COPY handler.py /workspace/handler.py
 
-CMD ["python", "handler.py"]
-
+CMD ["python", "-u", "/workspace/handler.py"]
