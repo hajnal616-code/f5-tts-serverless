@@ -1,51 +1,44 @@
-# CUDA 12.1 + cuDNN, Ubuntu 22.04 — F5-TTS-hez ajánlott
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/workspace/.cache/huggingface \
-    TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
-    TORCH_HOME=/workspace/.cache/torch
-
-# Rendszer csomagok
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3.10 python3-pip python3.10-venv \
-      git ffmpeg libsndfile1 curl ca-certificates \
-    && ln -sf /usr/bin/python3.10 /usr/bin/python \
-    && ln -sf /usr/bin/python3.10 /usr/bin/python3 \
-    && rm -rf /var/lib/apt/lists/*
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/root/.cache/huggingface \
+    HF_HUB_ENABLE_HF_TRANSFER=1
 
 WORKDIR /workspace
 
-# 1) PyTorch CUDA 12.1 build
+# System deps — ffmpeg is required for torchaudio mp3 encoding
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        git \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1) Python deps
 RUN pip install --upgrade pip && \
-    pip install torch==2.3.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121
+    pip install \
+        runpod \
+        requests \
+        hf_transfer \
+        "huggingface_hub>=0.24" && \
+    pip install f5-tts
 
-# 2) F5-TTS + runtime függőségek
-RUN pip install \
-      f5-tts \
-      runpod \
-      soundfile \
-      numpy \
-      transformers \
-      accelerate
+# 2) Sanity check the CUDA stack early — fail fast if wheels don't match
+RUN python -c "import torch, torchaudio; \
+print('torch', torch.__version__, 'cuda', torch.version.cuda, 'torchaudio', torchaudio.__version__)"
 
-# 3) Modell előmelegítés build közben (opcionális, de gyorsítja a cold startot)
-#    Ha nem akarod a nagy image-et, kommenteld ki — futáskor tölti le.
+# 3) Preload F5-TTS Base checkpoint + vocoder into the image (cuts cold start)
 RUN python -c "\
-from f5_tts.infer.utils_infer import load_vocoder, load_model; \
-from f5_tts.model import DiT; \
+from huggingface_hub import hf_hub_download; \
+p = hf_hub_download(repo_id='SWivid/F5-TTS', filename='F5TTS_Base/model_1200000.safetensors'); \
+print('checkpoint cached at', p); \
+from f5_tts.infer.utils_infer import load_vocoder; \
 load_vocoder(); \
-load_model(DiT, dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4), \
-           ckpt_path='hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors'); \
-print('models cached')"
+print('vocoder cached')"
 
-# 4) Build-time sanity check
-RUN python -c "import torch, torchaudio; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'ta', torchaudio.__version__)"
-
-# 5) Handler
+# 4) Handler
 COPY handler.py /workspace/handler.py
 
-CMD ["python", "-u", "/workspace/handler.py"]
+CMD ["python", "-u", "handler.py"]
