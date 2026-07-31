@@ -9,7 +9,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /workspace
 
-# System dependencies
+# ---------------------------------------------------------
+# SYSTEM PACKAGES
+# ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         git \
@@ -17,49 +19,55 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Python tooling
+# ---------------------------------------------------------
+# PYTHON TOOLING
+# ---------------------------------------------------------
 RUN python -m pip install --upgrade pip setuptools wheel
 
-# IMPORTANT:
-# transformers 5.x is incompatible with torch 2.4.x in this image because it imports DTensor.
-# Pin transformers/tokenizers to stable 4.x versions.
-RUN cat > /tmp/constraints.txt <<'EOF'
-transformers==4.46.3
-tokenizers==0.20.3
-numpy==1.26.4
-tomlkit==0.15.1
-EOF
-
-# Install runtime + F5-TTS with pinned dependency constraints
-RUN pip install -c /tmp/constraints.txt \
+# ---------------------------------------------------------
+# INSTALL PYTHON DEPENDENCIES
+# ---------------------------------------------------------
+RUN pip install \
         runpod \
         requests \
-        hf_transfer \
+        soundfile \
         "huggingface_hub>=0.24" \
-        f5-tts \
-    && pip install -c /tmp/constraints.txt --force-reinstall \
-        "transformers==4.46.3" \
-        "tokenizers==0.20.3" \
-        "numpy==1.26.4" \
-        "tomlkit==0.15.1"
+        f5-tts
 
-# Quick dependency check
-RUN python -c "import torch, torchaudio; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'torchaudio', torchaudio.__version__)" && \
-    python -c "import transformers; print('transformers', transformers.__version__)"
+# ---------------------------------------------------------
+# DOWNLOAD MAXDORGER29 MODEL FILES
+# ---------------------------------------------------------
+RUN python - << 'EOF'
+from huggingface_hub import hf_hub_download
 
-# Pre-cache F5-TTS checkpoint.
-# Do NOT call load_vocoder() here; importing full F5 inference during build was where the failure happened.
-RUN python -c "\
-from huggingface_hub import hf_hub_download; \
-p = hf_hub_download(repo_id='SWivid/F5-TTS', filename='F5TTS_Base/model_1200000.safetensors'); \
-print('F5 checkpoint cached at', p)"
+# Main model weights
+hf_hub_download(
+    repo_id="Maxdorger29/f5-tts-hungarian",
+    filename="model_last_final.safetensors",
+    local_dir="/workspace"
+)
 
-# Optional: cache common vocoder repo files without importing F5 runtime.
-RUN python -c "\
-from huggingface_hub import snapshot_download; \
-p = snapshot_download(repo_id='charactr/vocos-mel-24khz'); \
-print('vocoder cached at', p)"
+# Vocabulary file
+hf_hub_download(
+    repo_id="Maxdorger29/f5-tts-hungarian",
+    filename="vocab.txt",
+    local_dir="/workspace"
+)
 
+# Config file
+hf_hub_download(
+    repo_id="Maxdorger29/f5-tts-hungarian",
+    filename="config.json",
+    local_dir="/workspace"
+)
+EOF
+
+# ---------------------------------------------------------
+# COPY HANDLER
+# ---------------------------------------------------------
 COPY handler.py /workspace/handler.py
 
+# ---------------------------------------------------------
+# START SERVERLESS HANDLER
+# ---------------------------------------------------------
 CMD ["python", "/workspace/handler.py"]
