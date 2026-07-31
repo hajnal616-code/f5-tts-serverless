@@ -1,7 +1,12 @@
-import os
 import base64
-import requests
+import io
+import torch
 import runpod
+import soundfile as sf
+
+# A modell saját API-ja
+from f5_tts.api import F5TTS
+
 
 # -----------------------------
 #  MAGYAR F5 TTS MODELL OSZTÁLY
@@ -9,33 +14,29 @@ import runpod
 
 class HungarianF5TTS:
     def __init__(self):
-        # A Modal endpoint URL-je (Invoke URL)
-        self.modal_url = os.getenv("MODAL_TTS_URL")  # <-- ezt RunPod env-ben add meg
-        self.api_key = os.getenv("MODAL_API_KEY")    # <-- ezt is RunPod env-ben add meg
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        if not self.modal_url:
-            raise ValueError("MODAL_TTS_URL nincs beállítva RunPod environment variables-ben.")
-        if not self.api_key:
-            raise ValueError("MODAL_API_KEY nincs beállítva RunPod environment variables-ben.")
+        # A három fájl a Hugging Face-ből
+        self.model = F5TTS(
+            model="F5TTS_v1_Base",
+            ckpt_file="/workspace/model_last_final.safetensors",
+            vocab_file="/workspace/vocab.txt",
+            device=self.device,
+            use_ema=True,
+        )
 
     def synthesize(self, text: str) -> bytes:
         """
-        Magyar F5 TTS hívás Modal endpointtal.
-        Visszatér: raw audio bytes (wav).
+        Magyar F5 TTS → wav → raw bytes
         """
-        payload = {"text": text}
 
-        response = requests.post(
-            self.modal_url,
-            json=payload,
-            headers={"Authorization": f"Bearer {self.api_key}"}
-        )
+        with torch.no_grad():
+            wav = self.model.inference(text)  # numpy array [samples]
 
-        if response.status_code != 200:
-            raise Exception(f"Modal TTS error: {response.text}")
-
-        # Modal endpoint raw WAV bytes-t ad vissza
-        return response.content
+        # WAV-ba írás memóriába
+        buf = io.BytesIO()
+        sf.write(buf, wav, 24000, format="WAV")
+        return buf.getvalue()
 
 
 # Globális modellpéldány (RunPod csak egyszer tölti be)
