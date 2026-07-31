@@ -1,57 +1,26 @@
-import base64
-import runpod
-
-# -----------------------------
-#  MAGYAR F5 TTS MODELL OSZTÁLY
-# -----------------------------
+import os
+import requests
 
 class HungarianF5TTS:
     def __init__(self):
-        # IDE KELL BETÖLTENI A MAGYAR MODELLT
-        # Példa: Modal API hívás vagy HF modell betöltés
-        pass
+        self.modal_url = "https://api.modal.com/api/v1/endpoints/YOUR_ENDPOINT_ID"   # <-- ezt megadod
+        self.api_key = os.getenv("MODAL_API_KEY")  # RunPod env variable
 
     def synthesize(self, text: str) -> bytes:
         """
-        Itt kell meghívni a magyar F5 TTS modellt.
-        A visszatérési érték: raw audio bytes (wav vagy mp3).
+        Magyar F5 TTS hívás Modal endpointtal.
+        Visszatér: raw audio bytes (wav).
         """
-        # TODO: Modal / HuggingFace / saját modell hívása
-        raise NotImplementedError("Ide tedd be a magyar F5 TTS hívását.")
+        payload = {"text": text}
 
+        response = requests.post(
+            self.modal_url,
+            json=payload,
+            headers={"Authorization": f"Bearer {self.api_key}"}
+        )
 
-# Globális modellpéldány (RunPod csak egyszer tölti be)
-tts_model = HungarianF5TTS()
+        if response.status_code != 200:
+            raise Exception(f"Modal TTS error: {response.text}")
 
-
-# -----------------------------
-#  RUNPOD HANDLER
-# -----------------------------
-
-def handler(event):
-    try:
-        text = event["input"]["text"]
-
-        # Magyar TTS → audio bytes
-        audio_bytes = tts_model.synthesize(text)
-
-        # Base64 kódolás JSON válaszhoz
-        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-
-        return {
-            "status": "success",
-            "audio_base64": audio_b64
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
-
-
-# -----------------------------
-#  RUNPOD SERVERLESS START
-# -----------------------------
-
-runpod.serverless.start({"handler": handler})
+        # Modal endpoint raw WAV bytes-t ad vissza
+        return response.content
