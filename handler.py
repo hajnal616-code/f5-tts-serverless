@@ -4,13 +4,11 @@ import torch
 import runpod
 import soundfile as sf
 
-# A modell saját API-ja
 from f5_tts.api import F5TTS
 
+# Lazy-init modellpéldány
+tts_model = None
 
-# -----------------------------
-#  MAGYAR F5 TTS MODELL OSZTÁLY
-# -----------------------------
 
 class HungarianF5TTS:
     def __init__(self):
@@ -29,7 +27,6 @@ class HungarianF5TTS:
         """
         Magyar F5 TTS → wav → raw bytes
         """
-
         with torch.no_grad():
             wav = self.model.inference(text)  # numpy array [samples]
 
@@ -39,15 +36,13 @@ class HungarianF5TTS:
         return buf.getvalue()
 
 
-# Globális modellpéldány (RunPod csak egyszer tölti be)
-tts_model = HungarianF5TTS()
-
-
-# -----------------------------
-#  RUNPOD HANDLER
-# -----------------------------
-
 def handler(event):
+    global tts_model
+
+    # Lazy-init: csak akkor töltjük be a modellt, amikor már biztosan létezik minden fájl
+    if tts_model is None:
+        tts_model = HungarianF5TTS()
+
     try:
         text = event["input"]["text"]
 
@@ -68,9 +63,5 @@ def handler(event):
             "message": str(e)
         }
 
-
-# -----------------------------
-#  RUNPOD SERVERLESS START
-# -----------------------------
 
 runpod.serverless.start({"handler": handler})
