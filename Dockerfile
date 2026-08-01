@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /workspace
 
 # ---------------------------------------------------------
-# SYSTEM PACKAGES
+# SYSTEM PACKAG
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
