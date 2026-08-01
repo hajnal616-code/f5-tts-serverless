@@ -37,10 +37,30 @@ RUN pip install \
 # ---------------------------------------------------------
 # DOWNLOAD MAXDORGER29 MODEL FILES
 # ---------------------------------------------------------
-RUN python -c "from huggingface_hub import hf_hub_download; \
-    hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='model_last_final.safetensors', local_dir='/workspace'); \
-    hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='vocab.txt', local_dir='/workspace'); \
-    hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='config.json', local_dir='/workspace')"
+RUN python - << 'EOF'
+from huggingface_hub import hf_hub_download
+
+# Main model weights
+hf_hub_download(
+    repo_id="Maxdorger29/f5-tts-hungarian",
+    filename="model_last_final.safetensors",
+    local_dir="/workspace"
+)
+
+# Vocabulary file
+hf_hub_download(
+    repo_id="Maxdorger29/f5-tts-hungarian",
+    filename="vocab.txt",
+    local_dir="/workspace"
+)
+
+# Config file
+hf_hub_download(
+    repo_id="Maxdorger29/f5-tts-hungarian",
+    filename="config.json",
+    local_dir="/workspace"
+)
+EOF
 
 # ---------------------------------------------------------
 # COPY HANDLER
