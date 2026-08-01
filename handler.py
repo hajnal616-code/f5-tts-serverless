@@ -6,7 +6,7 @@ import soundfile as sf
 
 from f5_tts.api import F5TTS
 
-# Lazy-init modellpéldány
+# Lazy-init modellpéldánya
 tts_model = None
 
 
