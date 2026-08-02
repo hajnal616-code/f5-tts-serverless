@@ -10,6 +10,7 @@ import requests
 
 print("RunPod Serverless Worker indítása...", flush=True)
 
+MODEL_NAME = "mp3pintyo/F5-TTS-Hun"
 DEFAULT_REF_FILE = "/workspace/default_ref.wav"
 DEFAULT_REF_TEXT = "Magyar teszt referencia hang."
 
@@ -54,25 +55,58 @@ def get_model():
     if tts_model is not None:
         return tts_model
 
-    print("Maxdorger29 Magyar F5-TTS modell betöltése CUDA/CPU eszközre...", flush=True)
+    print(f"Magyar F5-TTS modell betöltése ({MODEL_NAME}) CUDA/CPU eszközre...", flush=True)
     from f5_tts.api import F5TTS
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Használt eszköz: {device}", flush=True)
 
+    # Priority 1: Check mp3pintyo checkpoint file
+    pt_path = "/workspace/model_122000-hun.pt"
+    vocab_path = "/workspace/vocab.txt"
+    safetensors_path = "/workspace/model_last_final.safetensors"
+
+    if os.path.exists(pt_path):
+        try:
+            print(f"Próbálkozás mp3pintyo/F5-TTS-Hun betöltésével ({pt_path})...", flush=True)
+            tts_model = F5TTS(
+                ckpt_file=pt_path,
+                vocab_file=vocab_path if os.path.exists(vocab_path) else "",
+                device=device,
+                use_ema=True,
+            )
+            print("mp3pintyo/F5-TTS-Hun modell sikeresen betöltve!", flush=True)
+            return tts_model
+        except Exception as e:
+            print(f"Figyelem: pt modell fájl betöltési hiba: {e}", flush=True)
+
+    # Priority 2: Safetensors model fallback
+    if os.path.exists(safetensors_path):
+        try:
+            print(f"Próbálkozás F5-TTS safetensors modellel ({safetensors_path})...", flush=True)
+            tts_model = F5TTS(
+                ckpt_file=safetensors_path,
+                vocab_file=vocab_path if os.path.exists(vocab_path) else "",
+                device=device,
+                use_ema=True,
+            )
+            print("F5-TTS safetensors modell sikeresen betöltve!", flush=True)
+            return tts_model
+        except Exception as e:
+            print(f"Figyelem: safetensors modell betöltési hiba: {e}", flush=True)
+
+    # Priority 3: Direct repo load
     try:
+        print(f"Próbálkozás közvetlen {MODEL_NAME} hf repo betöltéssel...", flush=True)
         tts_model = F5TTS(
-            ckpt_file="/workspace/model_last_final.safetensors",
-            vocab_file="/workspace/vocab.txt",
+            model_name=MODEL_NAME,
             device=device,
-            use_ema=True,
         )
         print("Modell sikeresen betöltve!", flush=True)
-    except Exception as e1:
-        print(f"Hiba a modell betöltésekor: {e1}", flush=True)
-        raise e1
-
-    return tts_model
+        return tts_model
+    except Exception as e:
+        print(f"Modell betöltési hiba: {e}", flush=True)
+        raise e
 
 
 def handler(event):
@@ -88,6 +122,7 @@ def handler(event):
     try:
         input_data = event.get("input", {})
         text = input_data.get("text", "")
+        ref_audio_base64 = input_data.get("ref_audio_base64", "")
         ref_audio_url = input_data.get("ref_audio_url", "")
         ref_text_in = input_data.get("ref_text", "")
 
@@ -97,16 +132,32 @@ def handler(event):
         gen_text = str(text).strip()
         print(f"Generálás indítása szövegre: '{gen_text[:50]}...'", flush=True)
 
-        # Handle reference audio file
+        # Handle reference audio decoding
         ref_file = None
-        if ref_audio_url and str(ref_audio_url).strip():
+        tmp_path = "/tmp/ref_audio.wav"
+
+        # 1. Check ref_audio_base64 input payload parameter
+        if ref_audio_base64 and str(ref_audio_base64).strip():
+            try:
+                b64_str = str(ref_audio_base64).strip()
+                if "," in b64_str:
+                    b64_str = b64_str.split(",")[-1]
+                audio_bytes = base64.b64decode(b64_str)
+                with open(tmp_path, "wb") as f:
+                    f.write(audio_bytes)
+                ref_file = tmp_path
+                print(f"Base64 referencia hang dekódolva /tmp/ref_audio.wav ({len(audio_bytes)} bájt)", flush=True)
+            except Exception as b64_err:
+                print(f"Hiba a ref_audio_base64 dekódolásakor: {b64_err}", flush=True)
+
+        # 2. Check ref_audio_url fallback parameter if ref_audio_base64 wasn't provided or failed
+        if not ref_file and ref_audio_url and str(ref_audio_url).strip():
             ref_url = str(ref_audio_url).strip()
             if ref_url.startswith("http://") or ref_url.startswith("https://"):
                 try:
-                    print(f"Referencia hang letöltése: {ref_url}", flush=True)
+                    print(f"Referencia hang letöltése URL-ről: {ref_url}", flush=True)
                     r = requests.get(ref_url, timeout=15)
                     r.raise_for_status()
-                    tmp_path = "/tmp/ref_audio.wav"
                     with open(tmp_path, "wb") as f:
                         f.write(r.content)
                     ref_file = tmp_path
@@ -116,16 +167,17 @@ def handler(event):
                 try:
                     b64_data = ref_url.split(",")[-1]
                     audio_data = base64.b64decode(b64_data)
-                    tmp_path = "/tmp/ref_audio.wav"
                     with open(tmp_path, "wb") as f:
                         f.write(audio_data)
                     ref_file = tmp_path
                 except Exception as b64_err:
-                    print(f"Hiba a base64 referencia hang dekódolásakor: {b64_err}", flush=True)
+                    print(f"Hiba a base64 URL dekódolásakor: {b64_err}", flush=True)
             elif os.path.exists(ref_url):
                 ref_file = ref_url
 
+        # 3. Fallback to default reference audio if none provided
         if not ref_file or not os.path.exists(ref_file):
+            print("Alapértelmezett referencia hang használata...", flush=True)
             ref_file = ensure_default_ref_audio()
 
         # Handle reference text
@@ -133,7 +185,7 @@ def handler(event):
         if ref_text_in and str(ref_text_in).strip():
             ref_text = str(ref_text_in).strip()
 
-        print(f"F5TTS.infer hívás: ref_file='{ref_file}', ref_text='{ref_text}', gen_text='{gen_text[:30]}...'", flush=True)
+        print(f"F5TTS.infer hívás: ref_file='{ref_file}', ref_text='{ref_text[:40]}...', gen_text='{gen_text[:30]}...'", flush=True)
 
         with torch.no_grad():
             res = model.infer(
@@ -160,7 +212,8 @@ def handler(event):
         return {
             "status": "success",
             "audio_file": audio_b64,
-            "audio_base64": audio_b64
+            "audio_base64": audio_b64,
+            "sample_rate": sr
         }
 
     except Exception as e:
