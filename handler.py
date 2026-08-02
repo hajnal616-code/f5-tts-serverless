@@ -6,61 +6,82 @@ import soundfile as sf
 
 from f5_tts.api import F5TTS
 
-# Lazy-init modellpéldánya
-tts_model = None
-
-
-class HungarianF5TTS:
-    def __init__(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # A három fájl a Hugging Face-ből
-        self.model = F5TTS(
-            model="F5TTS_v1_Base",
-            ckpt_file="/workspace/model_last_final.safetensors",
-            vocab_file="/workspace/vocab.txt",
-            device=self.device,
-            use_ema=True,
-        )
-
-    def synthesize(self, text: str) -> bytes:
-        """
-        Magyar F5 TTS → wav → raw bytes
-        """
-        with torch.no_grad():
-            wav = self.model.inference(text)  # numpy array [samples]
-
-        # WAV-ba írás memóriába
-        buf = io.BytesIO()
-        sf.write(buf, wav, 24000, format="WAV")
-        return buf.getvalue()
+# Pre-load the Hungarian F5-TTS model when the worker container boot (Warm start)
+print("Betöltés: Maxdorger29 Magyar F5-TTS modell...")
+try:
+    tts_model = F5TTS(
+        model="F5TTS_v1_Base",
+        ckpt_file="/workspace/model_last_final.safetensors",
+        vocab_file="/workspace/vocab.txt",
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        use_ema=True,
+    )
+    print("Sikeres magyar F5-TTS modell betöltés!")
+except Exception as e:
+    print(f"Hiba a modell betöltésekor indításkor: {e}")
+    tts_model = None
 
 
 def handler(event):
     global tts_model
 
-    # Lazy-init: csak akkor töltjük be a modellt, amikor már biztosan létezik minden fájl
+    # Backup lazy load if global load failed
     if tts_model is None:
-        tts_model = HungarianF5TTS()
+        try:
+            tts_model = F5TTS(
+                model="F5TTS_v1_Base",
+                ckpt_file="/workspace/model_last_final.safetensors",
+                vocab_file="/workspace/vocab.txt",
+                device="cuda" if torch.cuda.is_available() else "cpu",
+                use_ema=True,
+            )
+        except Exception as e:
+            return {"status": "error", "error": f"Modell betöltési hiba: {str(e)}"}
 
     try:
-        text = event["input"]["text"]
+        input_data = event.get("input", {})
+        text = input_data.get("text", "")
+        ref_audio_url = input_data.get("ref_audio_url", "")
+        ref_text = input_data.get("ref_text", "")
 
-        # Magyar TTS → audio bytes
-        audio_bytes = tts_model.synthesize(text)
+        if not text or not text.strip():
+            return {"status": "error", "error": "Hiányzó 'text' paraméter!"}
 
-        # Base64 kódolás JSON válaszhoz
+        # F5TTS.infer returns (wav, sample_rate, spect)
+        with torch.no_grad():
+            res = tts_model.infer(
+                gen_text=text.strip(),
+                ref_file=ref_audio_url if ref_audio_url else "",
+                ref_text=ref_text if ref_text else "",
+            )
+
+            if isinstance(res, tuple):
+                wav = res[0]
+                sr = res[1] if len(res) > 1 else 24000
+            else:
+                wav = res
+                sr = 24000
+
+        # Encode numpy wav array to WAV bytes in memory
+        buf = io.BytesIO()
+        sf.write(buf, wav, sr, format="WAV")
+        audio_bytes = buf.getvalue()
+
+        # Base64 encode for response
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
 
         return {
             "status": "success",
+            "audio_file": audio_b64,
             "audio_base64": audio_b64
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {
             "status": "error",
-            "message": str(e)
+            "error": str(e)
         }
 
 
