@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /workspace
 
 # ---------------------------------------------------------
-# SYSTEM PACKAGES (libsndfile1 & ffmpeg)
+# SYSTEM PACKAGES (libsndfile1 & ffmpeg for audio processing)
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
