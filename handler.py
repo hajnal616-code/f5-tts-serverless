@@ -10,6 +10,42 @@ import requests
 
 print("RunPod Serverless Worker indítása...", flush=True)
 
+DEFAULT_REF_FILE = "/workspace/default_ref.wav"
+DEFAULT_REF_TEXT = "Magyar teszt referencia hang."
+
+def ensure_default_ref_audio():
+    if os.path.exists(DEFAULT_REF_FILE) and os.path.getsize(DEFAULT_REF_FILE) > 500:
+        return DEFAULT_REF_FILE
+
+    sample_urls = [
+        "https://huggingface.co/datasets/reach-vb/random-audios/resolve/main/sample1.wav",
+        "https://raw.githubusercontent.com/SWivid/F5-TTS/main/tests/infer/examples/basic/basic_ref_en.wav"
+    ]
+    for url in sample_urls:
+        try:
+            r = requests.get(url, timeout=5)
+            if r.status_code == 200 and len(r.content) > 500:
+                with open(DEFAULT_REF_FILE, "wb") as f:
+                    f.write(r.content)
+                print(f"Alapértelmezett referencia hang letöltve: {url}", flush=True)
+                return DEFAULT_REF_FILE
+        except Exception as e:
+            print(f"Nem sikerült letölteni letöltési URL-ről: {url} ({e})", flush=True)
+
+    # Fallback: Create synthetic 2-second WAV
+    try:
+        import numpy as np
+        sr = 24000
+        t = np.linspace(0, 2, sr * 2, endpoint=False)
+        audio = (0.05 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+        sf.write(DEFAULT_REF_FILE, audio, sr, format="WAV")
+        print("Szintetikus referencia hang létrehozva.", flush=True)
+    except Exception as e:
+        print(f"Hiba a szintetikus hang létrehozásakor: {e}", flush=True)
+
+    return DEFAULT_REF_FILE
+
+
 # Global model instance
 tts_model = None
 
@@ -53,14 +89,15 @@ def handler(event):
         input_data = event.get("input", {})
         text = input_data.get("text", "")
         ref_audio_url = input_data.get("ref_audio_url", "")
-        ref_text = input_data.get("ref_text", "")
+        ref_text_in = input_data.get("ref_text", "")
 
-        if not text or not text.strip():
+        if not text or not str(text).strip():
             return {"status": "error", "error": "Hiányzó vagy üres 'text' paraméter!"}
 
-        print(f"Generálás indítása szövegre: '{text[:50]}...'", flush=True)
+        gen_text = str(text).strip()
+        print(f"Generálás indítása szövegre: '{gen_text[:50]}...'", flush=True)
 
-        # Handle optional reference audio
+        # Handle reference audio file
         ref_file = None
         if ref_audio_url and str(ref_audio_url).strip():
             ref_url = str(ref_audio_url).strip()
@@ -88,15 +125,22 @@ def handler(event):
             elif os.path.exists(ref_url):
                 ref_file = ref_url
 
-        infer_kwargs = {
-            "gen_text": text.strip(),
-            "ref_file": ref_file,  # None if no reference audio provided
-        }
-        if ref_text and str(ref_text).strip():
-            infer_kwargs["ref_text"] = str(ref_text).strip()
+        if not ref_file or not os.path.exists(ref_file):
+            ref_file = ensure_default_ref_audio()
+
+        # Handle reference text
+        ref_text = DEFAULT_REF_TEXT
+        if ref_text_in and str(ref_text_in).strip():
+            ref_text = str(ref_text_in).strip()
+
+        print(f"F5TTS.infer hívás: ref_file='{ref_file}', ref_text='{ref_text}', gen_text='{gen_text[:30]}...'", flush=True)
 
         with torch.no_grad():
-            res = model.infer(**infer_kwargs)
+            res = model.infer(
+                ref_file=ref_file,
+                ref_text=ref_text,
+                gen_text=gen_text,
+            )
 
             if isinstance(res, tuple):
                 wav = res[0]
@@ -132,6 +176,7 @@ def handler(event):
 try:
     print("Modell előbetöltése indításkor...", flush=True)
     get_model()
+    ensure_default_ref_audio()
 except Exception as e:
     print(f"Figyelem: Az indításkori modell betöltés meghiúsult: {e}", flush=True)
 
