@@ -36,12 +36,13 @@ RUN python3 -m pip install \
         f5-tts
 
 # ---------------------------------------------------------
-# DOWNLOAD MAXDORGER29 HUNGARIAN F5-TTS MODEL FILES
+# DOWNLOAD HUNGARIAN F5-TTS MODEL FILES (mp3pintyo/F5-TTS-Hun & Maxdorger29)
 # ---------------------------------------------------------
 RUN python3 -c "from huggingface_hub import hf_hub_download; \
+hf_hub_download(repo_id='mp3pintyo/F5-TTS-Hun', filename='model_122000-hun.pt', local_dir='/workspace'); \
 hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='model_last_final.safetensors', local_dir='/workspace'); \
 hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='vocab.txt', local_dir='/workspace'); \
-hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='config.json', local_dir='/workspace')"
+hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='config.json', local_dir='/workspace')" || true
 
 # ---------------------------------------------------------
 # PRE-CACHE VOCOS VOCODER WEIGHTS & DEFAULT REF AUDIO
