@@ -44,11 +44,13 @@ hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='vocab.txt', lo
 hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='config.json', local_dir='/workspace')"
 
 # ---------------------------------------------------------
-# PRE-CACHE VOCOS VOCODER WEIGHTS
+# PRE-CACHE VOCOS VOCODER WEIGHTS & DEFAULT REF AUDIO
 # ---------------------------------------------------------
 RUN python3 -c "from huggingface_hub import hf_hub_download; \
 hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='config.yaml', local_dir='/workspace/.cache/huggingface/hub'); \
 hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='pytorch_model.bin', local_dir='/workspace/.cache/huggingface/hub')" || true
+
+RUN curl -L -o /workspace/default_ref.wav "https://huggingface.co/datasets/reach-vb/random-audios/resolve/main/sample1.wav" || true
 
 # ---------------------------------------------------------
 # COPY HANDLER & START WORKER
