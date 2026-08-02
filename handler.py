@@ -1,42 +1,62 @@
+import sys
 import base64
 import io
 import torch
 import runpod
 import soundfile as sf
+import traceback
 
-from f5_tts.api import F5TTS
+print("RunPod Serverless Worker indítása...", flush=True)
 
-# Pre-load the Hungarian F5-TTS model when the worker container boot (Warm start)
-print("Betöltés: Maxdorger29 Magyar F5-TTS modell...")
-try:
-    tts_model = F5TTS(
-        model="F5TTS_v1_Base",
-        ckpt_file="/workspace/model_last_final.safetensors",
-        vocab_file="/workspace/vocab.txt",
-        device="cuda" if torch.cuda.is_available() else "cpu",
-        use_ema=True,
-    )
-    print("Sikeres magyar F5-TTS modell betöltés!")
-except Exception as e:
-    print(f"Hiba a modell betöltésekor indításkor: {e}")
-    tts_model = None
+# Globális modell példány
+tts_model = None
+
+def get_model():
+    global tts_model
+    if tts_model is not None:
+        return tts_model
+
+    print("Maxdorger29 Magyar F5-TTS modell betöltése CUDA/CPU eszközre...", flush=True)
+    from f5_tts.api import F5TTS
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Használt eszköz: {device}", flush=True)
+
+    try:
+        tts_model = F5TTS(
+            model_type="F5-TTS",
+            ckpt_file="/workspace/model_last_final.safetensors",
+            vocab_file="/workspace/vocab.txt",
+            device=device,
+            use_ema=True,
+        )
+        print("Modell sikeresen betöltve (F5-TTS)!", flush=True)
+    except Exception as e1:
+        print(f"Hiba a model_type='F5-TTS' betöltésekor: {e1}", flush=True)
+        try:
+            tts_model = F5TTS(
+                ckpt_file="/workspace/model_last_final.safetensors",
+                vocab_file="/workspace/vocab.txt",
+                device=device,
+                use_ema=True,
+            )
+            print("Modell sikeresen betöltve (alapértelmezett model_type)!", flush=True)
+        except Exception as e2:
+            print(f"Hiba a magyar F5-TTS modell betöltésekor: {e2}", flush=True)
+            raise e2
+
+    return tts_model
 
 
 def handler(event):
-    global tts_model
-
-    # Backup lazy load if global load failed
-    if tts_model is None:
-        try:
-            tts_model = F5TTS(
-                model="F5TTS_v1_Base",
-                ckpt_file="/workspace/model_last_final.safetensors",
-                vocab_file="/workspace/vocab.txt",
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                use_ema=True,
-            )
-        except Exception as e:
-            return {"status": "error", "error": f"Modell betöltési hiba: {str(e)}"}
+    print(f"Beérkező kérés feldolgozása: {event}", flush=True)
+    
+    try:
+        model = get_model()
+    except Exception as e:
+        err_msg = f"Modell inicializálási hiba: {str(e)}\n{traceback.format_exc()}"
+        print(err_msg, flush=True)
+        return {"status": "error", "error": err_msg}
 
     try:
         input_data = event.get("input", {})
@@ -45,11 +65,12 @@ def handler(event):
         ref_text = input_data.get("ref_text", "")
 
         if not text or not text.strip():
-            return {"status": "error", "error": "Hiányzó 'text' paraméter!"}
+            return {"status": "error", "error": "Hiányzó vagy üres 'text' paraméter!"}
 
-        # F5TTS.infer returns (wav, sample_rate, spect)
+        print(f"Generálás indítása szövegre: '{text[:50]}...'", flush=True)
+
         with torch.no_grad():
-            res = tts_model.infer(
+            res = model.infer(
                 gen_text=text.strip(),
                 ref_file=ref_audio_url if ref_audio_url else "",
                 ref_text=ref_text if ref_text else "",
@@ -62,13 +83,13 @@ def handler(event):
                 wav = res
                 sr = 24000
 
-        # Encode numpy wav array to WAV bytes in memory
+        # WAV konvertálása memóriában
         buf = io.BytesIO()
         sf.write(buf, wav, sr, format="WAV")
         audio_bytes = buf.getvalue()
 
-        # Base64 encode for response
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+        print("Sikeres beszédgenerálás!", flush=True)
 
         return {
             "status": "success",
@@ -77,12 +98,21 @@ def handler(event):
         }
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        err_str = f"Hiba a generálás során: {str(e)}\n{traceback.format_exc()}"
+        print(err_str, flush=True)
         return {
             "status": "error",
-            "error": str(e)
+            "error": err_str
         }
 
 
+# Modell előbetöltése a konténer indításakor
+try:
+    print("Modell előbetöltése indításkor...", flush=True)
+    get_model()
+except Exception as e:
+    print(f"Figyelem: Az indításkori modell betöltés meghiúsult: {e}", flush=True)
+
+# RunPod Serverless worker indítása
+print("Calling runpod.serverless.start...", flush=True)
 runpod.serverless.start({"handler": handler})
