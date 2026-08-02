@@ -8,33 +8,35 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /workspace
 
-# ------------------------------------------------------
-# SYSTEM PACKAGES
-# --------------------------------------------------------
+# ---------------------------------------------------------
+# SYSTEM PACKAGES (libsndfile1 & ffmpeg)
+# ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         git \
         curl \
         ca-certificates \
+        libsndfile1 \
+        libsndfile1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
-# PYTHON TOOLING
+# PYTHON TOOLING & DEPENDENCIES
 # ---------------------------------------------------------
 RUN python3 -m pip install --upgrade pip setuptools wheel
 
-# ---------------------------------------------------------
-# INSTALL PYTHON DEPENDENCIES
-# ---------------------------------------------------------
-RUN pip install \
+RUN python3 -m pip install \
         runpod \
         requests \
         soundfile \
+        scipy \
+        vocos \
         "huggingface_hub>=0.24" \
+        "transformers>=4.43.0,<4.47.0" \
         f5-tts
 
 # ---------------------------------------------------------
-# DOWNLOAD MAXDORGER29 HUNGARIAN MODEL FILES
+# DOWNLOAD MAXDORGER29 HUNGARIAN F5-TTS MODEL FILES
 # ---------------------------------------------------------
 RUN python3 -c "from huggingface_hub import hf_hub_download; \
 hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='model_last_final.safetensors', local_dir='/workspace'); \
@@ -42,18 +44,15 @@ hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='vocab.txt', lo
 hf_hub_download(repo_id='Maxdorger29/f5-tts-hungarian', filename='config.json', local_dir='/workspace')"
 
 # ---------------------------------------------------------
-# PRE-CACHE BASE VOCODER WEIGHTS (CHARACTR/VOCOS-MEL-24KHZ)
+# PRE-CACHE VOCOS VOCODER WEIGHTS
 # ---------------------------------------------------------
 RUN python3 -c "from huggingface_hub import hf_hub_download; \
-hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='config.yaml'); \
-hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='pytorch_model.bin')" || true
+hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='config.yaml', local_dir='/workspace/.cache/huggingface/hub'); \
+hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='pytorch_model.bin', local_dir='/workspace/.cache/huggingface/hub')" || true
 
 # ---------------------------------------------------------
-# COPY HANDLER
+# COPY HANDLER & START WORKER
 # ---------------------------------------------------------
 COPY handler.py /workspace/handler.py
 
-# ---------------------------------------------------------
-# START SERVERLESS HANDLER
-# ---------------------------------------------------------
-CMD ["python3", "/workspace/handler.py"]
+CMD ["python3", "-u", "/workspace/handler.py"]
