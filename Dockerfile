@@ -36,15 +36,16 @@ RUN python3 -m pip install \
         f5-tts
 
 # ---------------------------------------------------------
-# DOWNLOAD CSETI/VIBEVOICE_7B_DIFFUSION-HEAD-LORA_HUNGARIAN-CV17 MODEL WEIGHTS
+# DOWNLOAD SARPBA/F5-TTS_V1_HUN_V2 HUNGARIAN F5-TTS MODEL FILES
 # ---------------------------------------------------------
-ENV TTS_MODEL_ID="Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17"
+ENV TTS_MODEL_ID="sarpba/F5-TTS_V1_hun_v2"
 
 RUN python3 -c "from huggingface_hub import hf_hub_download; \
-hf_hub_download(repo_id='Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17', filename='diffusion_head1200/diffusion_head/model.safetensors', local_dir='/workspace'); \
-hf_hub_download(repo_id='Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17', filename='diffusion_head1200/adapter_config.json', local_dir='/workspace'); \
-hf_hub_download(repo_id='Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17', filename='diffusion_head1200/diffusion_head/config.json', local_dir='/workspace'); \
-hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='vocab.txt', local_dir='/workspace')" || true
+hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_927900.safetensors', local_dir='/workspace'); \
+hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_927900.pt', local_dir='/workspace'); \
+hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='vocab.txt', local_dir='/workspace'); \
+hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='setting.json', local_dir='/workspace')" || true
+
 
 # ---------------------------------------------------------
 # PRE-CACHE VOCOS VOCODER WEIGHTS & DEFAULT REF AUDIO
