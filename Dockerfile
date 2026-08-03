@@ -25,8 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------
 RUN python3 -m pip install --upgrade pip setuptools wheel
 
-# Re-install/align torch and torchaudio to guarantee matching C++ ABI symbols
-RUN python3 -m pip install --no-cache-dir --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+# Re-install/align torch and torchaudio to guarantee matching C++ ABI symbols (torch/torchaudio 2.4.1+cu124)
+RUN python3 -m pip install --no-cache-dir "torch==2.4.1+cu124" "torchaudio==2.4.1+cu124" --index-url https://download.pytorch.org/whl/cu124
 
 RUN python3 -m pip install \
         runpod \
@@ -38,7 +38,6 @@ RUN python3 -m pip install \
         jieba \
         librosa \
         ema-pytorch \
-        e2-tts \
         tomli \
         pydantic \
         "huggingface_hub>=0.24" \
