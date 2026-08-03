@@ -11,7 +11,7 @@ import requests
 
 print("RunPod Serverless Worker indítása...", flush=True)
 
-MODEL_NAME = os.environ.get("TTS_MODEL_ID", "Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17")
+MODEL_NAME = os.environ.get("TTS_MODEL_ID", "sarpba/F5-TTS_V1_hun_v2")
 HF_TOKEN = os.environ.get("HUGGINGFACE_TOKEN", "")
 
 DEFAULT_REF_FILE = "/workspace/default_ref.wav"
@@ -132,7 +132,7 @@ def get_model():
     if tts_model is not None:
         return tts_model
 
-    print(f"Magyar F5-TTS / VibeVoice modell betöltése ({MODEL_NAME}) CUDA/CPU eszközre...", flush=True)
+    print(f"Magyar F5-TTS modell betöltése ({MODEL_NAME}) CUDA/CPU eszközre...", flush=True)
     from f5_tts.api import F5TTS
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -140,15 +140,14 @@ def get_model():
 
     vocab_path = "/workspace/vocab.txt"
 
-    # Check local checkpoint files for Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17 and fallbacks
+    # Check local checkpoint files for sarpba/F5-TTS_V1_hun_v2 and fallbacks
     checkpoints = [
-        "/workspace/diffusion_head1200/diffusion_head/model.safetensors",
-        "/workspace/diffusion_head1200/diffusion_head/diffusion_head_full.bin",
-        "/workspace/diffusion_head900/diffusion_head/model.safetensors",
-        "/workspace/diffusion_head600/diffusion_head/model.safetensors",
         "/workspace/model_927900.safetensors",
         "/workspace/model_927900.pt",
-        "/workspace/model_122000-hun.pt"
+        "/workspace/model_309300.safetensors",
+        "/workspace/model_309300.pt",
+        "/workspace/model_122000-hun.pt",
+        "/workspace/model_last_final.safetensors"
     ]
 
     for ckpt in checkpoints:
@@ -166,17 +165,57 @@ def get_model():
             except Exception as e:
                 print(f"Figyelem: {ckpt} betöltési hiba: {e}", flush=True)
 
-    # Fallback to direct HF repo load
+    # Fallback: Dynamic Hugging Face Hub download & cache path retrieval
     try:
-        print(f"Próbálkozás közvetlen {MODEL_NAME} HF repo betöltéssel...", flush=True)
+        print(f"Modellfájlok letöltése és betöltése a Hugging Face Hub-ról ({MODEL_NAME})...", flush=True)
+        from huggingface_hub import hf_hub_download
+
+        downloaded_ckpt = None
+        downloaded_vocab = None
+
+        # Download vocab.txt
+        try:
+            downloaded_vocab = hf_hub_download(repo_id=MODEL_NAME, filename="vocab.txt")
+            print(f"Sikeres vocab.txt letöltés/elérés: {downloaded_vocab}", flush=True)
+        except Exception as ve:
+            print(f"Figyelem: nem sikerült letölteni a vocab.txt-t a {MODEL_NAME} repóból: {ve}", flush=True)
+            if os.path.exists(vocab_path):
+                downloaded_vocab = vocab_path
+
+        # Try downloading checkpoints in order of preference
+        filenames_to_try = [
+            "model_927900.safetensors",
+            "model_927900.pt",
+            "model_309300.safetensors",
+            "model_309300.pt",
+            "model_122000-hun.pt",
+            "model_last_final.safetensors"
+        ]
+
+        for fname in filenames_to_try:
+            try:
+                print(f"Letöltési kísérlet: {fname}...", flush=True)
+                downloaded_ckpt = hf_hub_download(repo_id=MODEL_NAME, filename=fname)
+                print(f"Sikeres {fname} letöltés: {downloaded_ckpt}", flush=True)
+                break
+            except Exception as de:
+                print(f"Nem sikerült a(z) {fname} letöltése a {MODEL_NAME} repóból: {de}", flush=True)
+
+        if not downloaded_ckpt:
+            raise ValueError(f"Egyetlen ismert modellfájlt sem sikerült letölteni a {MODEL_NAME} repóból!")
+
+        print(f"Próbálkozás modell betöltésével a letöltött fájlból ({downloaded_ckpt})...", flush=True)
         tts_model = F5TTS(
-            model_name=MODEL_NAME,
+            ckpt_file=downloaded_ckpt,
+            vocab_file=downloaded_vocab if downloaded_vocab else "",
             device=device,
+            use_ema=True,
         )
-        print(f"Modell ({MODEL_NAME}) sikeresen betöltve!", flush=True)
+        print(f"Modell ({MODEL_NAME}) sikeresen betöltve a letöltött fájlból!", flush=True)
         return tts_model
+
     except Exception as e:
-        print(f"Modell betöltési hiba: {e}", flush=True)
+        print(f"Modell betöltési hiba a HF Hub-ról: {e}", flush=True)
         raise e
 
 
@@ -258,7 +297,7 @@ def handler(event):
         if ref_text_in and str(ref_text_in).strip():
             ref_text = normalize_hungarian_text(str(ref_text_in).strip())
 
-        print(f"TTS infer hívás ({MODEL_NAME}): ref_file='{ref_file}', ref_text='{ref_text[:40]}...', gen_text='{gen_text[:40]}...'", flush=True)
+        print(f"F5TTS.infer hívás (sarpba/F5-TTS_V1_hun_v2): ref_file='{ref_file}', ref_text='{ref_text[:40]}...', gen_text='{gen_text[:40]}...'", flush=True)
 
         with torch.no_grad():
             res = model.infer(
