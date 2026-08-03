@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import base64
 import io
 import torch
@@ -10,9 +11,85 @@ import requests
 
 print("RunPod Serverless Worker indítása...", flush=True)
 
-MODEL_NAME = "mp3pintyo/F5-TTS-Hun"
+MODEL_NAME = os.environ.get("TTS_MODEL_ID", "Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17")
+HF_TOKEN = os.environ.get("HUGGINGFACE_TOKEN", "")
+
 DEFAULT_REF_FILE = "/workspace/default_ref.wav"
 DEFAULT_REF_TEXT = "Magyar teszt referencia hang."
+
+def normalize_hungarian_text(text: str) -> str:
+    """
+    Magyar nyelvű szövegnormalizáló:
+    - Számok, dátumok, pénznemek (Ft), mértékegységek (km, kg) és mozaikszavak átírása fonetikus szöveggé.
+    """
+    if not text or not text.strip():
+        return ""
+
+    t = text.strip()
+
+    # Gyakori rövidítések és szimbólumok
+    t = re.sub(r'\bFt\b|\bft\b', ' forint', t)
+    t = re.sub(r'\bkm\b|\bKM\b', ' kilométer', t)
+    t = re.sub(r'\bkg\b|\bKG\b', ' kilogramm', t)
+    t = re.sub(r'\bcm\b', ' centiméter', t)
+    t = re.sub(r'\bmm\b', ' milliméter', t)
+    t = re.sub(r'%\s*|\b%\b', ' százalék ', t)
+    t = re.sub(r'\bTV\b', ' Tévé', t)
+    t = re.sub(r'\bUSA\b', ' U S A', t)
+
+    def num_to_hu(n: int) -> str:
+        if n == 0:
+            return "nulla"
+        units = ["", "egy", "kettő", "három", "négy", "öt", "hat", "hét", "nyolc", "kilenc"]
+        tens_exact = ["", "tíz", "húsz", "harminc", "negyven", "ötven", "hatvan", "hetven", "nyolcvan", "kilencven"]
+        tens_prefix = ["", "tizen", "huszon", "harminc", "negyven", "ötven", "hatvan", "hetven", "nyolcvan", "kilencven"]
+
+        if n < 10:
+            return units[n]
+        if n < 100:
+            d1, d2 = divmod(n, 10)
+            if d2 == 0:
+                return tens_exact[d1]
+            return tens_prefix[d1] + units[d2]
+        if n < 1000:
+            d1, d2 = divmod(n, 100)
+            prefix = ("egy" if d1 == 1 else units[d1]) + "száz"
+            return prefix if d2 == 0 else prefix + num_to_hu(d2)
+        if n < 1000000:
+            d1, d2 = divmod(n, 1000)
+            prefix = num_to_hu(d1) + "ezer"
+            return prefix if d2 == 0 else prefix + ("-" if d1 > 2 else "") + num_to_hu(d2)
+        return str(n)
+
+    months_hu = ["", "január", "február", "március", "április", "május", "június", "július", "augusztus", "szeptember", "október", "november", "december"]
+
+    def date_repl(match):
+        try:
+            y, m, d = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            y_str = num_to_hu(y)
+            m_str = months_hu[m] if 1 <= m <= 12 else str(m)
+            d_str = "első" if d == 1 else ("második" if d == 2 else num_to_hu(d) + "adik")
+            return f"{y_str} {m_str} {d_str}"
+        except Exception:
+            return match.group(0)
+
+    # Dátum normalizáció (pl. 2026.08.02.)
+    t = re.sub(r'(\d{4})\.(\d{1,2})\.(\d{1,2})\.?', date_repl, t)
+
+    # Egyszerű szám átírás (1-999999)
+    def number_repl(match):
+        try:
+            val = int(match.group(0))
+            if val <= 999999:
+                return " " + num_to_hu(val) + " "
+        except Exception:
+            pass
+        return match.group(0)
+
+    t = re.sub(r'\b\d+\b', number_repl, t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
 
 def ensure_default_ref_audio():
     if os.path.exists(DEFAULT_REF_FILE) and os.path.getsize(DEFAULT_REF_FILE) > 500:
@@ -55,54 +132,48 @@ def get_model():
     if tts_model is not None:
         return tts_model
 
-    print(f"Magyar F5-TTS modell betöltése ({MODEL_NAME}) CUDA/CPU eszközre...", flush=True)
+    print(f"Magyar F5-TTS / VibeVoice modell betöltése ({MODEL_NAME}) CUDA/CPU eszközre...", flush=True)
     from f5_tts.api import F5TTS
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Használt eszköz: {device}", flush=True)
 
-    # Priority 1: Check mp3pintyo checkpoint file
-    pt_path = "/workspace/model_122000-hun.pt"
     vocab_path = "/workspace/vocab.txt"
-    safetensors_path = "/workspace/model_last_final.safetensors"
 
-    if os.path.exists(pt_path):
-        try:
-            print(f"Próbálkozás mp3pintyo/F5-TTS-Hun betöltésével ({pt_path})...", flush=True)
-            tts_model = F5TTS(
-                ckpt_file=pt_path,
-                vocab_file=vocab_path if os.path.exists(vocab_path) else "",
-                device=device,
-                use_ema=True,
-            )
-            print("mp3pintyo/F5-TTS-Hun modell sikeresen betöltve!", flush=True)
-            return tts_model
-        except Exception as e:
-            print(f"Figyelem: pt modell fájl betöltési hiba: {e}", flush=True)
+    # Check local checkpoint files for Cseti/VibeVoice_7B_Diffusion-head-LoRA_Hungarian-CV17 and fallbacks
+    checkpoints = [
+        "/workspace/diffusion_head1200/diffusion_head/model.safetensors",
+        "/workspace/diffusion_head1200/diffusion_head/diffusion_head_full.bin",
+        "/workspace/diffusion_head900/diffusion_head/model.safetensors",
+        "/workspace/diffusion_head600/diffusion_head/model.safetensors",
+        "/workspace/model_927900.safetensors",
+        "/workspace/model_927900.pt",
+        "/workspace/model_122000-hun.pt"
+    ]
 
-    # Priority 2: Safetensors model fallback
-    if os.path.exists(safetensors_path):
-        try:
-            print(f"Próbálkozás F5-TTS safetensors modellel ({safetensors_path})...", flush=True)
-            tts_model = F5TTS(
-                ckpt_file=safetensors_path,
-                vocab_file=vocab_path if os.path.exists(vocab_path) else "",
-                device=device,
-                use_ema=True,
-            )
-            print("F5-TTS safetensors modell sikeresen betöltve!", flush=True)
-            return tts_model
-        except Exception as e:
-            print(f"Figyelem: safetensors modell betöltési hiba: {e}", flush=True)
+    for ckpt in checkpoints:
+        if os.path.exists(ckpt):
+            try:
+                print(f"Próbálkozás modell betöltésével: {ckpt}...", flush=True)
+                tts_model = F5TTS(
+                    ckpt_file=ckpt,
+                    vocab_file=vocab_path if os.path.exists(vocab_path) else "",
+                    device=device,
+                    use_ema=True,
+                )
+                print(f"Sikeres modellbetöltés a helyi fájlból ({ckpt})!", flush=True)
+                return tts_model
+            except Exception as e:
+                print(f"Figyelem: {ckpt} betöltési hiba: {e}", flush=True)
 
-    # Priority 3: Direct repo load
+    # Fallback to direct HF repo load
     try:
-        print(f"Próbálkozás közvetlen {MODEL_NAME} hf repo betöltéssel...", flush=True)
+        print(f"Próbálkozás közvetlen {MODEL_NAME} HF repo betöltéssel...", flush=True)
         tts_model = F5TTS(
             model_name=MODEL_NAME,
             device=device,
         )
-        print("Modell sikeresen betöltve!", flush=True)
+        print(f"Modell ({MODEL_NAME}) sikeresen betöltve!", flush=True)
         return tts_model
     except Exception as e:
         print(f"Modell betöltési hiba: {e}", flush=True)
@@ -122,21 +193,23 @@ def handler(event):
     try:
         input_data = event.get("input", {})
         text = input_data.get("text", "")
-        ref_audio_base64 = input_data.get("ref_audio_base64", "")
+        ref_audio_base64 = input_data.get("ref_audio_base64") or input_data.get("ref_audio") or ""
         ref_audio_url = input_data.get("ref_audio_url", "")
         ref_text_in = input_data.get("ref_text", "")
 
         if not text or not str(text).strip():
             return {"status": "error", "error": "Hiányzó vagy üres 'text' paraméter!"}
 
-        gen_text = str(text).strip()
-        print(f"Generálás indítása szövegre: '{gen_text[:50]}...'", flush=True)
+        # Step 1: Hungarian text normalization before TTS inference
+        raw_text = str(text).strip()
+        gen_text = normalize_hungarian_text(raw_text)
+        print(f"Szövegnormalizálás elvégezve: '{raw_text[:40]}...' -> '{gen_text[:40]}...'", flush=True)
 
         # Handle reference audio decoding
         ref_file = None
         tmp_path = "/tmp/ref_audio.wav"
 
-        # 1. Check ref_audio_base64 input payload parameter
+        # 1. Check ref_audio_base64 / ref_audio input payload parameter
         if ref_audio_base64 and str(ref_audio_base64).strip():
             try:
                 b64_str = str(ref_audio_base64).strip()
@@ -150,7 +223,7 @@ def handler(event):
             except Exception as b64_err:
                 print(f"Hiba a ref_audio_base64 dekódolásakor: {b64_err}", flush=True)
 
-        # 2. Check ref_audio_url fallback parameter if ref_audio_base64 wasn't provided or failed
+        # 2. Check ref_audio_url fallback parameter if base64 wasn't provided or failed
         if not ref_file and ref_audio_url and str(ref_audio_url).strip():
             ref_url = str(ref_audio_url).strip()
             if ref_url.startswith("http://") or ref_url.startswith("https://"):
@@ -180,12 +253,12 @@ def handler(event):
             print("Alapértelmezett referencia hang használata...", flush=True)
             ref_file = ensure_default_ref_audio()
 
-        # Handle reference text
+        # Handle reference text (also normalized)
         ref_text = DEFAULT_REF_TEXT
         if ref_text_in and str(ref_text_in).strip():
-            ref_text = str(ref_text_in).strip()
+            ref_text = normalize_hungarian_text(str(ref_text_in).strip())
 
-        print(f"F5TTS.infer hívás: ref_file='{ref_file}', ref_text='{ref_text[:40]}...', gen_text='{gen_text[:30]}...'", flush=True)
+        print(f"TTS infer hívás ({MODEL_NAME}): ref_file='{ref_file}', ref_text='{ref_text[:40]}...', gen_text='{gen_text[:40]}...'", flush=True)
 
         with torch.no_grad():
             res = model.infer(
