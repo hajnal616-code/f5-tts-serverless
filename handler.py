@@ -27,7 +27,6 @@ def normalize_hungarian_text(text: str) -> str:
 
     t = text.strip()
 
-    # Gyakori rövidítések és szimbólumok
     t = re.sub(r'\bFt\b|\bft\b', ' forint', t)
     t = re.sub(r'\bkm\b|\bKM\b', ' kilométer', t)
     t = re.sub(r'\bkg\b|\bKG\b', ' kilogramm', t)
@@ -73,10 +72,8 @@ def normalize_hungarian_text(text: str) -> str:
         except Exception:
             return match.group(0)
 
-    # Dátum normalizáció (pl. 2026.08.02.)
     t = re.sub(r'(\d{4})\.(\d{1,2})\.(\d{1,2})\.?', date_repl, t)
 
-    # Egyszerű szám átírás (1-999999)
     def number_repl(match):
         try:
             val = int(match.group(0))
@@ -110,7 +107,6 @@ def ensure_default_ref_audio():
         except Exception as e:
             print(f"Nem sikerült letölteni letöltési URL-ről: {url} ({e})", flush=True)
 
-    # Fallback: Create synthetic 2-second WAV
     try:
         import numpy as np
         sr = 24000
@@ -140,7 +136,6 @@ def get_model():
 
     vocab_path = "/workspace/vocab.txt"
 
-    # Check local checkpoint files for sarpba/F5-TTS_V1_hun_v2 and fallbacks
     checkpoints = [
         "/workspace/model_927900.safetensors",
         "/workspace/model_927900.pt",
@@ -165,7 +160,6 @@ def get_model():
             except Exception as e:
                 print(f"Figyelem: {ckpt} betöltési hiba: {e}", flush=True)
 
-    # Fallback: Dynamic Hugging Face Hub download & cache path retrieval
     try:
         print(f"Modellfájlok letöltése és betöltése a Hugging Face Hub-ról ({MODEL_NAME})...", flush=True)
         from huggingface_hub import hf_hub_download
@@ -173,7 +167,6 @@ def get_model():
         downloaded_ckpt = None
         downloaded_vocab = None
 
-        # Download vocab.txt
         try:
             downloaded_vocab = hf_hub_download(repo_id=MODEL_NAME, filename="vocab.txt")
             print(f"Sikeres vocab.txt letöltés/elérés: {downloaded_vocab}", flush=True)
@@ -182,7 +175,6 @@ def get_model():
             if os.path.exists(vocab_path):
                 downloaded_vocab = vocab_path
 
-        # Try downloading checkpoints in order of preference
         filenames_to_try = [
             "model_927900.safetensors",
             "model_927900.pt",
@@ -220,14 +212,13 @@ def get_model():
 
 
 def handler(event):
-    print(f"Beérkező kérés feldolgozása: {event}", flush=True)
-    
+    print("Új feladat érkezett a dolgozóhoz!", flush=True)
     try:
         model = get_model()
     except Exception as e:
-        err_msg = f"Modell inicializálási hiba: {str(e)}\n{traceback.format_exc()}"
+        err_msg = f"Modell inicializálási hiba: {e}\n{traceback.format_exc()}"
         print(err_msg, flush=True)
-        return {"status": "error", "error": err_msg}
+        return {"status": "error", "error": f"Modell inicializálási hiba: {e}"}
 
     try:
         input_data = event.get("input", {})
@@ -239,60 +230,43 @@ def handler(event):
         if not text or not str(text).strip():
             return {"status": "error", "error": "Hiányzó vagy üres 'text' paraméter!"}
 
-        # Step 1: Hungarian text normalization before TTS inference
         raw_text = str(text).strip()
         gen_text = normalize_hungarian_text(raw_text)
         print(f"Szövegnormalizálás elvégezve: '{raw_text[:40]}...' -> '{gen_text[:40]}...'", flush=True)
 
-        # Handle reference audio decoding
         ref_file = None
-        tmp_path = "/tmp/ref_audio.wav"
 
-        # 1. Check ref_audio_base64 / ref_audio input payload parameter
         if ref_audio_base64 and str(ref_audio_base64).strip():
             try:
                 b64_str = str(ref_audio_base64).strip()
                 if "," in b64_str:
-                    b64_str = b64_str.split(",")[-1]
+                    b64_str = b64_str.split(",", 1)[1]
                 audio_bytes = base64.b64decode(b64_str)
-                with open(tmp_path, "wb") as f:
+                ref_file = "/tmp/user_ref_audio.wav"
+                with open(ref_file, "wb") as f:
                     f.write(audio_bytes)
-                ref_file = tmp_path
-                print(f"Base64 referencia hang dekódolva /tmp/ref_audio.wav ({len(audio_bytes)} bájt)", flush=True)
+                print(f"Referencia hang dekódolva base64-ből ({len(audio_bytes)} bájt)", flush=True)
             except Exception as b64_err:
                 print(f"Hiba a ref_audio_base64 dekódolásakor: {b64_err}", flush=True)
 
-        # 2. Check ref_audio_url fallback parameter if base64 wasn't provided or failed
         if not ref_file and ref_audio_url and str(ref_audio_url).strip():
             ref_url = str(ref_audio_url).strip()
             if ref_url.startswith("http://") or ref_url.startswith("https://"):
                 try:
                     print(f"Referencia hang letöltése URL-ről: {ref_url}", flush=True)
-                    r = requests.get(ref_url, timeout=15)
-                    r.raise_for_status()
-                    with open(tmp_path, "wb") as f:
-                        f.write(r.content)
-                    ref_file = tmp_path
-                except Exception as dl_err:
-                    print(f"Hiba a referencia hang letöltésekor: {dl_err}", flush=True)
-            elif ref_url.startswith("data:audio") or len(ref_url) > 256:
-                try:
-                    b64_data = ref_url.split(",")[-1]
-                    audio_data = base64.b64decode(b64_data)
-                    with open(tmp_path, "wb") as f:
-                        f.write(audio_data)
-                    ref_file = tmp_path
-                except Exception as b64_err:
-                    print(f"Hiba a base64 URL dekódolásakor: {b64_err}", flush=True)
-            elif os.path.exists(ref_url):
-                ref_file = ref_url
+                    r = requests.get(ref_url, timeout=10)
+                    if r.status_code == 200:
+                        ref_file = "/tmp/user_ref_url.wav"
+                        with open(ref_file, "wb") as f:
+                            f.write(r.content)
+                        print("Referencia hang sikeresen letöltve URL-ről.", flush=True)
+                except Exception as url_err:
+                    print(f"Hiba az URL letöltésekor: {url_err}", flush=True)
 
-        # 3. Fallback to default reference audio if none provided
-        if not ref_file or not os.path.exists(ref_file):
+        if not ref_file or not os.path.exists(ref_file) or os.path.getsize(ref_file) < 100:
             print("Alapértelmezett referencia hang használata...", flush=True)
             ref_file = ensure_default_ref_audio()
 
-        # Handle reference text (also normalized)
         ref_text = DEFAULT_REF_TEXT
         if ref_text_in and str(ref_text_in).strip():
             ref_text = normalize_hungarian_text(str(ref_text_in).strip())
@@ -304,47 +278,37 @@ def handler(event):
                 ref_file=ref_file,
                 ref_text=ref_text,
                 gen_text=gen_text,
+                file_wave_name="/tmp/output.wav",
+                seed=-1
             )
 
-            if isinstance(res, tuple):
-                wav = res[0]
-                sr = res[1] if len(res) > 1 else 24000
-            else:
-                wav = res
-                sr = 24000
+        output_path = "/tmp/output.wav"
+        if not os.path.exists(output_path):
+            if isinstance(res, tuple) and len(res) > 0 and isinstance(res[0], str) and os.path.exists(res[0]):
+                output_path = res[0]
+            elif isinstance(res, str) and os.path.exists(res):
+                output_path = res
 
-        # Encode numpy wav array to WAV bytes in memory
-        buf = io.BytesIO()
-        sf.write(buf, wav, sr, format="WAV")
-        audio_bytes = buf.getvalue()
+        if not os.path.exists(output_path):
+            return {"status": "error", "error": "A generált hangfájl nem található a lemezen!"}
 
-        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-        print("Sikeres beszédgenerálás!", flush=True)
+        with open(output_path, "rb") as f:
+            audio_data = f.read()
+
+        audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+        print(f"Sikeres beszédgenerálás! Audio méret: {len(audio_data)} bájt", flush=True)
 
         return {
             "status": "success",
-            "audio_file": audio_b64,
             "audio_base64": audio_b64,
-            "sample_rate": sr
+            "format": "wav",
+            "sample_rate": 24000
         }
 
     except Exception as e:
-        err_str = f"Hiba a generálás során: {str(e)}\n{traceback.format_exc()}"
+        err_str = f"Inferencia hiba történt: {e}\n{traceback.format_exc()}"
         print(err_str, flush=True)
-        return {
-            "status": "error",
-            "error": err_str
-        }
+        return {"status": "error", "error": f"Generálási hiba: {e}"}
 
-
-# Warm load model on worker container boot
-try:
-    print("Modell előbetöltése indításkor...", flush=True)
-    get_model()
-    ensure_default_ref_audio()
-except Exception as e:
-    print(f"Figyelem: Az indításkori modell betöltés meghiúsult: {e}", flush=True)
-
-# Start the RunPod Serverless worker
 print("Calling runpod.serverless.start...", flush=True)
 runpod.serverless.start({"handler": handler})
