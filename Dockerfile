@@ -38,6 +38,7 @@ RUN python3 -m pip install \
         jieba \
         librosa \
         ema-pytorch \
+        cached-path \
         tomli \
         pydantic \
         "huggingface_hub>=0.24" \
@@ -55,6 +56,7 @@ hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_927900.safete
 hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_927900.pt', local_dir='/workspace'); \
 hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='vocab.txt', local_dir='/workspace'); \
 hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='setting.json', local_dir='/workspace')" || true
+
 
 # ---------------------------------------------------------
 # PRE-CACHE VOCOS VOCODER WEIGHTS & DEFAULT REF AUDIO
