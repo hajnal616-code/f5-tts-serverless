@@ -39,6 +39,8 @@ RUN python3 -m pip install \
         librosa \
         ema-pytorch \
         cached-path \
+        hydra-core \
+        omegaconf \
         tomli \
         pydantic \
         "huggingface_hub>=0.24" \
