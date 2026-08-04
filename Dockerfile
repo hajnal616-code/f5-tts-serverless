@@ -41,6 +41,9 @@ RUN python3 -m pip install \
         cached-path \
         hydra-core \
         omegaconf \
+        matplotlib \
+        tqdm \
+        einops \
         tomli \
         pydantic \
         "huggingface_hub>=0.24" \
