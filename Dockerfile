@@ -1,15 +1,15 @@
+# =========================================================
+# RUNPOD SERVERLESS DOCKERFILE FOR F5-TTS HUNGARIAN WORKER
+# =========================================================
+
+# 1. Base Image: RunPod PyTorch 2.4.0 with CUDA 12.4.1 support
 FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/workspace/.cache/huggingface \
-    HUGGINGFACE_HUB_CACHE=/workspace/.cache/huggingface/hub \
-    PYTHONUNBUFFERED=1
-
+# Set working directory
 WORKDIR /workspace
 
 # ---------------------------------------------------------
-# SYSTEM PACKAGES (libsndfile1 & ffmpeg for audio processing)
+# SYSTEM DEPENDENCIES (ffmpeg, libsndfile, git, curl, etc.)
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
-# PYTHON TOOLING & DEPENDENCIES
+# PYTHON PIP & BASE PACKAGES
 # ---------------------------------------------------------
 RUN python3 -m pip install --upgrade pip setuptools wheel
 
@@ -44,6 +44,7 @@ RUN python3 -m pip install \
         matplotlib \
         tqdm \
         einops \
+        pydub \
         tomli \
         pydantic \
         "huggingface_hub>=0.24" \
@@ -54,27 +55,21 @@ RUN python3 -m pip install --no-deps f5-tts
 # ---------------------------------------------------------
 # DOWNLOAD SARPBA/F5-TTS_V1_HUN_V2 HUNGARIAN F5-TTS MODEL FILES
 # ---------------------------------------------------------
-ENV TTS_MODEL_ID="sarpba/F5-TTS_V1_hun_v2"
+RUN python3 -c "\
+from huggingface_hub import hf_hub_download;\
+print('Downloading vocab.txt...');\
+hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='vocab.txt', local_dir='/workspace/checkpoints/hungarian');\
+print('Downloading model checkpoint...');\
+try:\
+    hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_927900.safetensors', local_dir='/workspace/checkpoints/hungarian');\
+except Exception as e:\
+    print('Failed model_927900.safetensors, trying model_122000-hun.pt...', e);\
+    hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_122000-hun.pt', local_dir='/workspace/checkpoints/hungarian');\
+print('Hungarian F5-TTS Model Files Downloaded Successfully!')\
+"
 
-RUN python3 -c "from huggingface_hub import hf_hub_download; \
-hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_927900.safetensors', local_dir='/workspace'); \
-hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='model_927900.pt', local_dir='/workspace'); \
-hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='vocab.txt', local_dir='/workspace'); \
-hf_hub_download(repo_id='sarpba/F5-TTS_V1_hun_v2', filename='setting.json', local_dir='/workspace')" || true
-
-
-# ---------------------------------------------------------
-# PRE-CACHE VOCOS VOCODER WEIGHTS & DEFAULT REF AUDIO
-# ---------------------------------------------------------
-RUN python3 -c "from huggingface_hub import hf_hub_download; \
-hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='config.yaml', local_dir='/workspace/.cache/huggingface/hub'); \
-hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='pytorch_model.bin', local_dir='/workspace/.cache/huggingface/hub')" || true
-
-RUN curl -L -o /workspace/default_ref.wav "https://huggingface.co/datasets/reach-vb/random-audios/resolve/main/sample1.wav" || true
-
-# ---------------------------------------------------------
-# COPY HANDLER & START WORKER
-# ---------------------------------------------------------
+# Copy handler script
 COPY handler.py /workspace/handler.py
 
-CMD ["python3", "-u", "/workspace/handler.py"]
+# Set default execution command for RunPod Serverless container
+CMD [ "python3", "-u", "/workspace/handler.py" ]
