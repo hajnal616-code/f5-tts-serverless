@@ -38,6 +38,8 @@ RUN python3 -m pip install \
         jieba \
         librosa \
         ema-pytorch \
+        x-transformers \
+        torchdiffeq \
         cached-path \
         hydra-core \
         omegaconf \
@@ -47,6 +49,9 @@ RUN python3 -m pip install \
         pydub \
         tomli \
         pydantic \
+        click \
+        datasets \
+        accelerate \
         "huggingface_hub>=0.24" \
         "transformers>=4.43.0,<4.47.0"
 
@@ -64,9 +69,7 @@ RUN python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(rep
 # ---------------------------------------------------------
 # PRE-CACHE VOCOS VOCODER WEIGHTS & DEFAULT REF AUDIO
 # ---------------------------------------------------------
-RUN python3 -c "from huggingface_hub import hf_hub_download; \
-hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='config.yaml', local_dir='/workspace/.cache/huggingface/hub'); \
-hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='pytorch_model.bin', local_dir='/workspace/.cache/huggingface/hub')" || true
+RUN python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='config.yaml', local_dir='/workspace/.cache/huggingface/hub'); hf_hub_download(repo_id='charactr/vocos-mel-24khz', filename='pytorch_model.bin', local_dir='/workspace/.cache/huggingface/hub')" || true
 
 RUN curl -L -o /workspace/default_ref.wav "https://huggingface.co/datasets/reach-vb/random-audios/resolve/main/sample1.wav" || true
 
