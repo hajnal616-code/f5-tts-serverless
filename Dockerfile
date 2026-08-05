@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------
 RUN python3 -m pip install --upgrade pip setuptools wheel
 
-# Re-install/align torch, torchaudio, and torchvision to guarantee matching C++ ABI symbols (torch/torchaudio 2.4.1+cu124, torchvision 0.19.1+cu124)
+# Re-install/align torch, torchaudio, and torchvision to guarantee matching C++ ABI symbols
 RUN python3 -m pip install --no-cache-dir "torch==2.4.1+cu124" "torchaudio==2.4.1+cu124" "torchvision==0.19.1+cu124" --index-url https://download.pytorch.org/whl/cu124
 
 RUN python3 -m pip install \
@@ -52,6 +52,8 @@ RUN python3 -m pip install \
         click \
         datasets \
         accelerate \
+        uvicorn \
+        fastapi \
         "huggingface_hub>=0.24" \
         "transformers>=4.43.0,<4.47.0"
 
@@ -74,7 +76,7 @@ RUN python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(rep
 RUN curl -L -o /workspace/default_ref.wav "https://huggingface.co/datasets/reach-vb/random-audios/resolve/main/sample1.wav" || true
 
 # ---------------------------------------------------------
-# COPY HANDLER & START WORKER
+# COPY HANDLER & START WORKER / POD SERVER
 # ---------------------------------------------------------
 COPY handler.py /workspace/handler.py
 
